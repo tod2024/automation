@@ -3,13 +3,109 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Upload CSV</title>
+    <title>Image Processing Upload</title>
 </head>
 <body>
-    <h1>Upload CSV</h1>
-    <form action="/upload" method="post" enctype="multipart/form-data">
-        <input type="file" name="file" accept=".csv" required>
-        <button type="submit">Upload</button>
+    <h1>Upload Images and Process</h1>
+    <form id="uploadForm" action="/upload" method="POST" enctype="multipart/form-data">
+        <input type="file" name="file" accept=".csv">
+        <button type="submit">Upload CSV File</button>
     </form>
+
+    <div id="progressBarContainer">
+        <div id="progressBar"></div>
+    </div>
+
+    <script>
+        const ratios = [
+            { width: 240, height: 135, format: 'png', addLogo: false },
+            { width: 800, height: 450, format: 'png', addLogo: false },
+            { width: 1280, height: 480, format: 'png', addLogo: true },
+            { width: 640, height: 360, format: 'webp', addLogo: false }
+        ];
+
+        const progressBar = document.getElementById('progressBar');
+
+        async function loadImage(url) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = reject;
+                img.src = url;
+            });
+        }
+
+        async function processImages() {
+            const form = document.getElementById('uploadForm');
+            const formData = new FormData(form);
+            const response = await fetch('/uploadLogo', {
+                method: 'POST',
+                body: formData
+            });
+            const logoUploadResponse = await response.text();
+            console.log(logoUploadResponse);
+
+            const backdropFiles = formData.getAll('backdropFiles');
+            const logoFiles = formData.getAll('logoFiles');
+
+            const zip = new JSZip();
+            const totalImages = backdropFiles.length;
+            let processedCount = 0;
+
+            function updateProgress() {
+                processedCount++;
+                const percentage = Math.round((processedCount / totalImages) * 100);
+                progressBar.style.width = `${percentage}%`;
+            }
+
+            for (let i = 0; i < backdropFiles.length; i++) {
+                const backdropImage = await loadImage(URL.createObjectURL(backdropFiles[i]));
+                const logoImage = await loadImage(URL.createObjectURL(logoFiles[i]));
+
+                for (let ratio of ratios) {
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    canvas.width = ratio.width;
+                    canvas.height = ratio.height;
+
+                    if (ratio.width === 1280 && ratio.height === 480) {
+                        // Add gradient layer for 1280x480 ratio
+                        const gradient = context.createLinearGradient(0, 0, canvas.width / 2, 0);
+                        gradient.addColorStop(0, 'rgba(1, 0, 0, 1)');
+                        gradient.addColorStop(1, 'rgba(1, 0, 0, 0)');
+
+                        context.fillStyle = gradient;
+                        context.fillRect(0, 0, canvas.width, canvas.height);
+                    }
+
+                    const { topCrop } = await SmartCrop.crop(backdropImage, { width: canvas.width, height: canvas.height });
+
+                    context.drawImage(backdropImage, topCrop.x, topCrop.y, topCrop.width, topCrop.height, 0, 0, canvas.width, canvas.height);
+
+                    if (ratio.addLogo && ratio.width === 1280 && ratio.height === 480) {
+                        const logoWidth = Math.min(400, logoImage.width);
+                        const logoHeight = logoWidth / logoImage.width * logoImage.height;
+                        const logoX = 50;
+                        const logoY = canvas.height - logoHeight - 40;
+
+                        context.drawImage(logoImage, logoX, logoY, logoWidth, logoHeight);
+                    }
+
+                    const blob = await new Promise(resolve => canvas.toBlob(resolve, `image/${ratio.format}`));
+                    if (ratio.format === 'webp' && blob.size > 150 * 1024) {
+                        const reducedQualityBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', 0.7));
+                        zip.file(`combined_${i}_${ratio.width}x${ratio.height}.${ratio.format}`, reducedQualityBlob);
+                    } else {
+                        zip.file(`combined_${i}_${ratio.width}x${ratio.height}.${ratio.format}`, blob);
+                    }
+
+                    updateProgress();
+                }
+            }
+
+            const content = await zip.generateAsync({ type: 'blob' });
+            saveAs(content, 'processed_images.zip');
+        }
+    </script>
 </body>
 </html>
