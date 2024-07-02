@@ -36,7 +36,7 @@ const upload = multer({ dest: 'uploads/' });
 
 // Serve the HTML form for file upload
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
+    res.sendFile(path.join(__dirname, '/public/index.html'));
 });
 
 app.post('/upload', upload.single('file'), async (req, res) => {
