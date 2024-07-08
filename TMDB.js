@@ -34,10 +34,9 @@ const port = 3000;
 // Configure multer for file uploads
 const upload = multer({ dest: 'uploads/' });
 
-// Serve the HTML form for file a
+// Serve the HTML form for file upload
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '/index.html'));
-
 });
 
 app.post('/upload', upload.single('file'), async (req, res) => {
@@ -49,6 +48,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         res.status(500).send('Error processing CSV file.');
     }
 });
+
 // Function to generate a timestamp string
 function generateTimestamp() {
     const now = new Date();
@@ -58,21 +58,17 @@ function generateTimestamp() {
 
 // Function to pad single digit numbers with a leading zero
 function pad(number) {
-    if (number < 10) {
-        return '0' + number;
-    }
-    return number;
+    return number < 10 ? '0' + number : number;
 }
 
-// // Example usage
+// Example usage
 const filename = `${generateTimestamp()}`;
 console.log(filename);  // Outputs something like: myfile_2024-07-01_14-30-00.txt
 
 app.get('/download', (req, res) => {
-    const zipFilePath = path.join(__dirname, 'processed_images_'+filename+'.zip');
+    const zipFilePath = path.join(__dirname, `processed_images_${filename}.zip`);
     res.download(zipFilePath);
-    console.log("after run:: "+filename);  // Outputs something like: myfile_2024-07-01_14-30-00.txt
-
+    console.log("after run:: " + filename);  // Outputs something like: myfile_2024-07-01_14-30-00.txt
 });
 
 // Define your ratios here
@@ -142,7 +138,7 @@ const processImage = async (imagePath, outputImagePath, width, height, addLogo, 
         // Load the logo image
         const logoImage = await loadImage(logoPath);
         const logoWidth = Math.min(400, logoImage.width);
-        const logoHeight = Math.round(logoWidth / logoImage.width * logoImage.height); // Ensure height is an integer
+        const logoHeight = Math.round((logoWidth / logoImage.width) * logoImage.height); // Ensure height is an integer
         const logoX = 50;
         const logoY = height - logoHeight - 40;
 
@@ -169,19 +165,28 @@ const processCSV = async (filePath) => {
                     if (movieDetails) {
                         const movieId = movieDetails.id;
                         const movieImages = await fetchMovieImages(movieId);
-                        
-                        // Download backdrop image
-                        if (movieImages.backdrops.length > 0) {
-                            const backdropUrl = `${TMDB_IMAGE_BASE_URL}${movieImages.backdrops[0].file_path}`;
+
+                        // Search for a non-empty backdrop image
+                        let backdropUrl = null;
+                        for (const backdrop of movieImages.backdrops) {
+                            if (backdrop.file_path) {
+                                backdropUrl = `${TMDB_IMAGE_BASE_URL}${backdrop.file_path}`;
+                                break;
+                            }
+                        }
+
+                        if (backdropUrl) {
                             const backdropPath = path.join(backdropsDir, `${movieName.replace(/[^a-zA-Z0-9]/g, '_')}_backdrop.jpg`);
                             await downloadImage(backdropUrl, backdropPath);
-                            
+
                             // Download logo image if exists
                             let logoPath = null;
                             if (movieImages.logos.length > 0) {
                                 const logoUrl = `${TMDB_IMAGE_BASE_URL}${movieImages.logos[0].file_path}`;
                                 logoPath = path.join(logosDir, `${movieName.replace(/[^a-zA-Z0-9]/g, '_')}_logo.png`);
                                 await downloadImage(logoUrl, logoPath);
+                            } else {
+                                console.warn(`No logo found for movie: ${movieName}`);
                             }
 
                             for (const ratio of ratios) {
@@ -191,19 +196,20 @@ const processCSV = async (filePath) => {
                                 const data = fs.readFileSync(outputImagePath);
                                 zip.file(`${movieName.replace(/[^a-zA-Z0-9]/g, '_')}_backdrop_${ratio.width}x${ratio.height}.${ratio.format}`, data);
                             }
+                        } else {
+                            console.warn(`No non-empty backdrop found for movie: ${movieName}`);
                         }
                     }
                 } catch (error) {
                     console.error(`Error processing movie "${movieName}":`, error);
                 }
             }
-            const zipFilePath = path.join(__dirname, 'processed_images_'+filename+'.zip');
+            const zipFilePath = path.join(__dirname, `processed_images_${filename}.zip`);
             zip.generateNodeStream({ type: 'nodebuffer', streamFiles: true })
                 .pipe(fs.createWriteStream(zipFilePath))
                 .on('finish', () => {
                     console.log(`Zip file created at ${zipFilePath}`);
-                    console.log("after run:: "+filename);  // Outputs something like: myfile_2024-07-01_14-30-00.txt
-
+                    console.log("after run:: " + filename);  // Outputs something like: myfile_2024-07-01_14-30-00.txt
                 });
 
             fs.unlinkSync(filePath);
